@@ -1,0 +1,51 @@
+---
+name: Renovate config
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  status:
+    name: Set Renovate config validation status
+    runs-on: ubuntu-latest
+    if: ${{ github.head_ref != 'renovate/reconfigure' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Check if any renovate config file has been added or modified
+        id: changes
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            renovate-config:
+              - "renovate.json"
+              - "renovate.jsonc"
+              - "renovate.json5"
+              - ".github/renovate.json"
+              - ".github/renovate.jsonc"
+              - ".github/renovate.json5"
+              - ".gitlab/renovate.json"
+              - ".gitlab/renovate.jsonc"
+              - ".gitlab/renovate.json5"
+              - ".renovaterc"
+              - ".renovaterc.json"
+              - ".renovaterc.jsonc"
+              - ".renovaterc.json5"
+
+      - name: Set commit status
+        run: |
+          curl -L \
+          -X POST \
+          -H "Accept: application/vnd.github+json" \
+          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          -H "X-GitHub-Api-Version: 2026-03-10" \
+          ${{ github.api_url }}/repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }} \
+          -d '{"state":"${{ (steps.changes.outputs.renovate-config == 'true' && !startsWith(github.head_ref, 'renovate/') ) && 'failure' || 'success' }}","context":"Renovate config validation"}'
