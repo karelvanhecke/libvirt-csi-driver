@@ -18,8 +18,7 @@ type ControllerServer struct {
 	client      *libvirt.Libvirt
 	defaultPool string
 
-	defaultCapacity    libvirtxml.StorageVolumeSize
-	defaultThinVolumes bool
+	defaultCapacity uint64
 
 	fsTypes     []string
 	accessModes []csi.VolumeCapability_AccessMode_Mode
@@ -27,14 +26,10 @@ type ControllerServer struct {
 
 func NewControllerServer(client *libvirt.Libvirt, defaultPool string) *ControllerServer {
 	return &ControllerServer{
-		client:      client,
-		defaultPool: defaultPool,
-		defaultCapacity: libvirtxml.StorageVolumeSize{
-			Unit:  "GiB",
-			Value: 1,
-		},
-		defaultThinVolumes: true,
-		fsTypes:            []string{"ext4", "xfs"},
+		client:          client,
+		defaultPool:     defaultPool,
+		defaultCapacity: 1073741824,
+		fsTypes:         []string{"ext4", "xfs"},
 		accessModes: []csi.VolumeCapability_AccessMode_Mode{
 			csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 			csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY,
@@ -63,14 +58,38 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if err == nil {
 		return cs.createVolumeExists(vol, req)
 	}
-	e, ok := err.(*libvirt.Error)
+	e, ok := err.(libvirt.Error)
 	if !ok || e.Code != uint32(libvirt.ErrNoStorageVol) {
 		return nil, grpcerr.Internal(err)
 	}
 
-	//TODO: volume creation
+	if err := cs.verifyVolumeCapabilities(req.GetVolumeCapabilities()); err != nil {
+		return nil, grpcerr.InvalidArgument(err)
+	}
 
-	return &csi.CreateVolumeResponse{}, nil
+	spec := &libvirtxml.StorageVolume{
+		Name: name,
+		Capacity: &libvirtxml.StorageVolumeSize{
+			Value: cs.determineCapacity(req.CapacityRange),
+		},
+	}
+
+	xml, err := spec.Marshal()
+	if err != nil {
+		return nil, grpcerr.Internal(err)
+	}
+
+	vol, err = cs.client.StorageVolCreateXML(pool, xml, 0)
+	if err != nil {
+		return nil, grpcerr.Internal(err)
+	}
+
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      vol.Key,
+			CapacityBytes: int64(spec.Capacity.Value),
+		},
+	}, nil
 }
 
 // Ensure the Libvirt client is connected.
@@ -96,8 +115,7 @@ func (cs *ControllerServer) createVolumeExists(vol libvirt.StorageVol, req *csi.
 		return nil, grpcerr.Internal(err)
 	}
 
-	capacityRange := req.GetCapacityRange()
-	if c := int64(capacity); c < capacityRange.GetRequiredBytes() || c > capacityRange.GetLimitBytes() {
+	if err := verifyCapacity(int64(capacity), req.CapacityRange); err != nil {
 		return nil, grpcerr.AlreadyExists(err)
 	}
 
@@ -146,6 +164,22 @@ func (cs *ControllerServer) verifyVolumeCapabilityMount(mount *csi.VolumeCapabil
 	return nil
 }
 
+func (cs *ControllerServer) determineCapacity(capRange *csi.CapacityRange) uint64 {
+	if capRange == nil {
+		return cs.defaultCapacity
+	}
+
+	if rb := capRange.RequiredBytes; rb != 0 {
+		return uint64(rb)
+	}
+
+	if lb := capRange.LimitBytes; lb != 0 && lb < int64(cs.defaultCapacity) {
+		return uint64(lb)
+	}
+
+	return cs.defaultCapacity
+}
+
 func (cs *ControllerServer) lookupStoragePool(params map[string]string) (libvirt.StoragePool, error) {
 	name := params["pool"]
 	if name == "" {
@@ -156,7 +190,7 @@ func (cs *ControllerServer) lookupStoragePool(params map[string]string) (libvirt
 	if err == nil {
 		return pool, nil
 	}
-	e, ok := err.(*libvirt.Error)
+	e, ok := err.(libvirt.Error)
 	if ok && e.Code == uint32(libvirt.ErrNoStoragePool) {
 		return libvirt.StoragePool{}, grpcerr.InvalidArgument(err)
 	}
@@ -165,4 +199,19 @@ func (cs *ControllerServer) lookupStoragePool(params map[string]string) (libvirt
 
 func volumeId(vol libvirt.StorageVol) string {
 	return vol.Key
+}
+
+func verifyCapacity(cap int64, capRange *csi.CapacityRange) error {
+	if capRange == nil {
+		return nil
+	}
+	if rb := capRange.RequiredBytes; rb != 0 && cap < rb {
+		return errors.New("existing volume does not meet required capacity")
+	}
+
+	if lb := capRange.LimitBytes; lb != 0 && cap > lb {
+		return errors.New("existing volume exceeds capacity limit")
+	}
+
+	return nil
 }
