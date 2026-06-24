@@ -127,6 +127,36 @@ func TestUnsupportedAccessMode(t *testing.T) {
 	}
 }
 
+func TestDeleteVolume(t *testing.T) {
+	cs := NewControllerServer(testClient(t), testPool)
+
+	tests := []struct {
+		Name  string
+		VolId string
+	}{
+		{
+			Name:  "ExistingVolume",
+			VolId: filepath.Join("/", testPool, testVol),
+		},
+		{
+			Name:  "NonExistingVolume",
+			VolId: t.Name(),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			_, err := cs.DeleteVolume(t.Context(), &csi.DeleteVolumeRequest{
+				VolumeId: test.VolId,
+			})
+
+			if err != nil {
+				t.Fail()
+			}
+		})
+	}
+}
+
 func testClient(t *testing.T) *libvirt.Libvirt {
 	wd, err := os.Getwd()
 	if err != nil {

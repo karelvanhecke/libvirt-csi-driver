@@ -41,11 +41,6 @@ func NewControllerServer(client *libvirt.Libvirt, defaultPool string) *Controlle
 }
 
 func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
-	err := cs.connectedClient()
-	if err != nil {
-		return nil, err
-	}
-
 	name := req.GetName()
 	params := req.GetParameters()
 
@@ -54,7 +49,12 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		return nil, err
 	}
 
-	vol, err := cs.client.StorageVolLookupByName(pool, name)
+	c, err := cs.connectedClient()
+	if err != nil {
+		return nil, err
+	}
+
+	vol, err := c.StorageVolLookupByName(pool, name)
 	if err == nil {
 		return cs.createVolumeExists(vol, req)
 	}
@@ -79,7 +79,7 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		return nil, grpcerr.Internal(err)
 	}
 
-	vol, err = cs.client.StorageVolCreateXML(pool, xml, 0)
+	vol, err = c.StorageVolCreateXML(pool, xml, 0)
 	if err != nil {
 		return nil, grpcerr.Internal(err)
 	}
@@ -92,17 +92,38 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}, nil
 }
 
+func (cs *ControllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
+	c, err := cs.connectedClient()
+	if err != nil {
+		return nil, err
+	}
+
+	vol, err := c.StorageVolLookupByKey(req.VolumeId)
+	if err == nil {
+		if err := c.StorageVolDelete(vol, 0); err != nil {
+			return nil, grpcerr.Internal(err)
+		}
+		return &csi.DeleteVolumeResponse{}, nil
+	}
+
+	e, ok := err.(libvirt.Error)
+	if !ok || e.Code != uint32(libvirt.ErrNoStorageVol) {
+		return nil, grpcerr.Internal(err)
+	}
+	return &csi.DeleteVolumeResponse{}, nil
+}
+
 // Ensure the Libvirt client is connected.
 // Returns grpc error code unavailable on connection issues.
-func (cs *ControllerServer) connectedClient() error {
+func (cs *ControllerServer) connectedClient() (*libvirt.Libvirt, error) {
 	if cs.client.IsConnected() {
-		return nil
+		return cs.client, nil
 	}
 	err := cs.client.Connect()
 	if err != nil {
-		return grpcerr.Unavailable(err)
+		return nil, grpcerr.Unavailable(err)
 	}
-	return nil
+	return cs.client, nil
 }
 
 // Handle existing volume.
@@ -110,7 +131,13 @@ func (cs *ControllerServer) createVolumeExists(vol libvirt.StorageVol, req *csi.
 	if err := cs.verifyVolumeCapabilities(req.GetVolumeCapabilities()); err != nil {
 		return nil, grpcerr.AlreadyExists(err)
 	}
-	_, capacity, _, err := cs.client.StorageVolGetInfo(vol)
+
+	c, err := cs.connectedClient()
+	if err != nil {
+		return nil, err
+	}
+
+	_, capacity, _, err := c.StorageVolGetInfo(vol)
 	if err != nil {
 		return nil, grpcerr.Internal(err)
 	}
@@ -186,7 +213,12 @@ func (cs *ControllerServer) lookupStoragePool(params map[string]string) (libvirt
 		name = cs.defaultPool
 	}
 
-	pool, err := cs.client.StoragePoolLookupByName(name)
+	c, err := cs.connectedClient()
+	if err != nil {
+		return libvirt.StoragePool{}, err
+	}
+
+	pool, err := c.StoragePoolLookupByName(name)
 	if err == nil {
 		return pool, nil
 	}
