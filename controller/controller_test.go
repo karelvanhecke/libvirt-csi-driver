@@ -10,6 +10,8 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/digitalocean/go-libvirt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -74,6 +76,51 @@ func TestCreateVolume(t *testing.T) {
 
 			if v.CapacityBytes != test.ExpectedCapacity {
 				t.Log("capacity bytes does not match expected value")
+				t.Fail()
+			}
+		})
+	}
+}
+
+func TestUnsupportedAccessMode(t *testing.T) {
+	cs := NewControllerServer(testClient(t), testPool)
+
+	tests := []struct {
+		Name    string
+		VolName string
+		Code    codes.Code
+	}{
+		{
+			Name:    "NewVolume",
+			VolName: t.Name(),
+			Code:    codes.InvalidArgument,
+		},
+		{
+			Name:    "ExistingVolume",
+			VolName: testVol,
+			Code:    codes.InvalidArgument,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			_, err := cs.CreateVolume(t.Context(), &csi.CreateVolumeRequest{
+				Name: test.Name,
+				VolumeCapabilities: []*csi.VolumeCapability{{
+					AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{}},
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+					},
+				}},
+			})
+
+			s, ok := status.FromError(err)
+			if !ok {
+				t.Fatalf("grpc error must be returned")
+			}
+
+			if s.Code() != test.Code {
+				t.Log("incorrect error code")
 				t.Fail()
 			}
 		})
