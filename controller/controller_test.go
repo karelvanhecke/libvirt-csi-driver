@@ -98,14 +98,14 @@ func TestUnsupportedAccessMode(t *testing.T) {
 		{
 			Name:    "ExistingVolume",
 			VolName: testVol,
-			Code:    codes.InvalidArgument,
+			Code:    codes.AlreadyExists,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
 			_, err := cs.CreateVolume(t.Context(), &csi.CreateVolumeRequest{
-				Name: test.Name,
+				Name: test.VolName,
 				VolumeCapabilities: []*csi.VolumeCapability{{
 					AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{}},
 					AccessMode: &csi.VolumeCapability_AccessMode{
