@@ -31,10 +31,12 @@ type ControllerServer struct {
 
 	fsTypes     []string
 	accessModes []csi.VolumeCapability_AccessMode_Mode
+
+	caps []*csi.ControllerServiceCapability
 }
 
 func NewControllerServer(client *libvirt.Libvirt, defaultPool string) *ControllerServer {
-	return &ControllerServer{
+	cs := &ControllerServer{
 		client:          client,
 		defaultPool:     defaultPool,
 		defaultCapacity: 1073741824,
@@ -47,6 +49,25 @@ func NewControllerServer(client *libvirt.Libvirt, defaultPool string) *Controlle
 			csi.VolumeCapability_AccessMode_SINGLE_NODE_MULTI_WRITER,
 		},
 	}
+
+	caps := []csi.ControllerServiceCapability_RPC_Type{
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
+		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
+		csi.ControllerServiceCapability_RPC_GET_CAPACITY,
+		csi.ControllerServiceCapability_RPC_PUBLISH_READONLY,
+		csi.ControllerServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
+	}
+	for _, cap := range caps {
+		cs.caps = append(cs.caps, &csi.ControllerServiceCapability{
+			Type: &csi.ControllerServiceCapability_Rpc{
+				Rpc: &csi.ControllerServiceCapability_RPC{
+					Type: cap,
+				},
+			},
+		})
+	}
+
+	return cs
 }
 
 func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
@@ -343,6 +364,12 @@ func (cs *ControllerServer) ControllerExpandVolume(ctx context.Context, req *csi
 	}
 
 	return resp, nil
+}
+
+func (cs *ControllerServer) ControllerGetCapabilities(ctx context.Context, req *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
+	return &csi.ControllerGetCapabilitiesResponse{
+		Capabilities: cs.caps,
+	}, nil
 }
 
 // Ensure the Libvirt client is connected.
