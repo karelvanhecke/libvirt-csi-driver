@@ -12,7 +12,13 @@ import (
 	"github.com/digitalocean/go-libvirt"
 	"github.com/google/uuid"
 	grpcerr "github.com/karelvanhecke/libvirt-csi-driver/pkg/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"libvirt.org/go/libvirtxml"
+)
+
+var (
+	ErrVolumeMustBeReadOnly = errors.New("volume must be read only")
 )
 
 type ControllerServer struct {
@@ -119,19 +125,30 @@ func (cs *ControllerServer) ControllerPublishVolume(ctx context.Context, req *cs
 	if err != nil {
 		return nil, err
 	}
-	disks, err := cs.domainDiskSpecsByID(req.GetNodeId())
+
+	dom, err := cs.domainByID(req.GetNodeId())
 	if err != nil {
 		return nil, err
 	}
 
 	cap := req.GetVolumeCapability()
 
-	wwn, ok, usedDevs, err := cs.controllerPublishVolumeExists(cap, vol, disks)
+	disk, ok, usedDevs, err := cs.isAttachedToDomain(vol, dom)
 	if err != nil {
 		return nil, err
 	}
 	if ok {
-		return &csi.ControllerPublishVolumeResponse{PublishContext: map[string]string{"wwn": wwn}}, nil
+		if err := cs.verifyVolumeCapabilities([]*csi.VolumeCapability{cap}); err != nil {
+			return nil, grpcerr.AlreadyExists(err)
+		}
+
+		if cap.AccessMode.Mode == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY || req.Readonly {
+			if disk.ReadOnly == nil {
+				return nil, grpcerr.AlreadyExists(ErrVolumeMustBeReadOnly)
+			}
+		}
+
+		return &csi.ControllerPublishVolumeResponse{PublishContext: map[string]string{"wwn": disk.WWN}}, nil
 	}
 
 	if err := cs.verifyVolumeCapabilities([]*csi.VolumeCapability{cap}); err != nil {
@@ -139,7 +156,7 @@ func (cs *ControllerServer) ControllerPublishVolume(ctx context.Context, req *cs
 	}
 
 	if cap.AccessMode.Mode == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY && !req.Readonly {
-		return nil, grpcerr.InvalidArgument(errors.New("multi node access requires readonly"))
+		return nil, grpcerr.InvalidArgument(ErrVolumeMustBeReadOnly)
 	}
 
 	dev, err := nextDev(usedDevs)
@@ -147,28 +164,13 @@ func (cs *ControllerServer) ControllerPublishVolume(ctx context.Context, req *cs
 		return nil, err
 	}
 
-	wwn, err = generateWWN()
+	wwn, err := generateWWN()
 	if err != nil {
 		return nil, err
 	}
 
-	disk, err := domainDisk(vol, wwn, dev)
-	if err != nil {
+	if err := cs.attachToDomain(vol, dom, wwn, dev); err != nil {
 		return nil, err
-	}
-
-	c, err := cs.connectedClient()
-	if err != nil {
-		return nil, err
-	}
-
-	dom, err := cs.domainByID(req.GetNodeId())
-	if err != nil {
-		return nil, err
-	}
-
-	if err := c.DomainAttachDevice(dom, disk); err != nil {
-		return nil, grpcerr.Internal(err)
 	}
 
 	return &csi.ControllerPublishVolumeResponse{
@@ -294,54 +296,6 @@ func (cs *ControllerServer) lookupStoragePool(params map[string]string) (libvirt
 	return libvirt.StoragePool{}, grpcerr.Internal(err)
 }
 
-func (cs *ControllerServer) controllerPublishVolumeExists(cap *csi.VolumeCapability, vol *libvirtxml.StorageVolume, disks []libvirtxml.DomainDisk) (wwn string, ok bool, usedDevs []string, err error) {
-	var disk *libvirtxml.DomainDisk
-Loop:
-	for _, d := range disks {
-		usedDevs = append(usedDevs, d.Target.Dev)
-		if d.Source == nil {
-			continue Loop
-		}
-
-		switch vol.Type {
-		case "file":
-			file := d.Source.File
-			if file == nil {
-				continue Loop
-			}
-			if file.File == vol.Target.Path {
-				disk = &d
-				break Loop
-			}
-		case "block":
-			block := d.Source.Block
-			if block == nil {
-				continue Loop
-			}
-			if block.Dev == vol.Target.Path {
-				disk = &d
-				break Loop
-			}
-		}
-	}
-
-	if disk == nil {
-		return "", false, usedDevs, nil
-	}
-
-	if err := cs.verifyVolumeCapabilities([]*csi.VolumeCapability{cap}); err != nil {
-		return "", false, nil, grpcerr.AlreadyExists(err)
-	}
-
-	if cap.AccessMode.Mode == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY {
-		if disk.ReadOnly == nil {
-			return "", false, nil, grpcerr.AlreadyExists(err)
-		}
-	}
-
-	return disk.WWN, true, usedDevs, nil
-}
-
 func (cs *ControllerServer) volumeSpecByID(id string) (*libvirtxml.StorageVolume, error) {
 	c, err := cs.connectedClient()
 	if err != nil {
@@ -368,13 +322,8 @@ func (cs *ControllerServer) volumeSpecByID(id string) (*libvirtxml.StorageVolume
 	return volSpec, nil
 }
 
-func (cs *ControllerServer) domainDiskSpecsByID(id string) ([]libvirtxml.DomainDisk, error) {
+func (cs *ControllerServer) domainDisks(dom libvirt.Domain) ([]libvirtxml.DomainDisk, error) {
 	c, err := cs.connectedClient()
-	if err != nil {
-		return nil, err
-	}
-
-	dom, err := cs.domainByID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -413,6 +362,92 @@ func (cs *ControllerServer) domainByID(id string) (libvirt.Domain, error) {
 	}
 
 	return dom, nil
+}
+
+func (cs *ControllerServer) isAttachedToDomain(vol *libvirtxml.StorageVolume, dom libvirt.Domain) (disk *libvirtxml.DomainDisk, ok bool, usedDevs []string, err error) {
+	disks, err := cs.domainDisks(dom)
+	if err != nil {
+		return nil, false, nil, err
+	}
+
+Loop:
+	for _, d := range disks {
+		usedDevs = append(usedDevs, d.Target.Dev)
+		if d.Source == nil {
+			continue Loop
+		}
+
+		switch vol.Type {
+		case "file":
+			file := d.Source.File
+			if file == nil {
+				continue Loop
+			}
+			if file.File == vol.Target.Path {
+				disk = &d
+				break Loop
+			}
+		case "block":
+			block := d.Source.Block
+			if block == nil {
+				continue Loop
+			}
+			if block.Dev == vol.Target.Path {
+				disk = &d
+				break Loop
+			}
+		}
+	}
+
+	if disk == nil {
+		return nil, false, usedDevs, nil
+	}
+
+	return disk, true, usedDevs, nil
+}
+
+func (cs *ControllerServer) attachToDomain(vol *libvirtxml.StorageVolume, dom libvirt.Domain, wwn, dev string) error {
+	disk, err := domainDisk(vol, wwn, dev)
+	if err != nil {
+		return err
+	}
+
+	c, err := cs.connectedClient()
+	if err != nil {
+		return err
+	}
+
+	if err := c.DomainAttachDevice(dom, disk); err == nil {
+		return nil
+	}
+
+	e, ok := err.(libvirt.Error)
+	if !ok || e.Code != uint32(libvirt.ErrResourceBusy) {
+		return grpcerr.Internal(err)
+	}
+
+	doms, _, err := c.ConnectListAllDomains(1, libvirt.ConnectListDomainsActive)
+	if err != nil {
+		return grpcerr.Internal(err)
+	}
+
+	for _, dom := range doms {
+		_, ok, _, err := cs.isAttachedToDomain(vol, dom)
+		if err != nil {
+			return grpcerr.Internal(err)
+		}
+
+		if ok {
+			id, err := uuid.ParseBytes(dom.UUID[:])
+			if err != nil {
+				return grpcerr.Internal(err)
+			}
+
+			return status.Error(codes.FailedPrecondition, id.String())
+		}
+	}
+
+	return grpcerr.Internal(e)
 }
 
 func domainDisk(vol *libvirtxml.StorageVolume, wwn string, dev string) (string, error) {
