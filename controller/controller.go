@@ -180,6 +180,41 @@ func (cs *ControllerServer) ControllerPublishVolume(ctx context.Context, req *cs
 	}, nil
 }
 
+func (cs *ControllerServer) ControllerUnpublishVolume(ctx context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
+	vol, err := cs.volumeSpecByID(req.GetVolumeId())
+	if err != nil {
+		return nil, err
+	}
+
+	dom, err := cs.domainByID(req.GetNodeId())
+	if err != nil {
+		return nil, err
+	}
+
+	disk, ok, _, err := cs.isAttachedToDomain(vol, dom)
+	if err != nil {
+		return nil, err
+	}
+
+	diskXML, err := disk.Marshal()
+	if err != nil {
+		return nil, grpcerr.Internal(err)
+	}
+
+	if ok {
+		c, err := cs.connectedClient()
+		if err != nil {
+			return nil, err
+		}
+
+		if err := c.DomainDetachDevice(dom, diskXML); err != nil {
+			return nil, grpcerr.Internal(err)
+		}
+	}
+
+	return &csi.ControllerUnpublishVolumeResponse{}, nil
+}
+
 // Ensure the Libvirt client is connected.
 // Returns grpc error code unavailable on connection issues.
 func (cs *ControllerServer) connectedClient() (*libvirt.Libvirt, error) {
