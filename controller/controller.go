@@ -215,6 +215,33 @@ func (cs *ControllerServer) ControllerUnpublishVolume(ctx context.Context, req *
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
 }
 
+func (cs *ControllerServer) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
+	c, err := cs.connectedClient()
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := c.StorageVolLookupByKey(req.GetVolumeId()); err != nil {
+		if isVolNotFoundError(err) {
+			return nil, grpcerr.NotFound(err)
+		}
+		return nil, grpcerr.Internal(err)
+	}
+
+	resp := &csi.ValidateVolumeCapabilitiesResponse{
+		Confirmed: &csi.ValidateVolumeCapabilitiesResponse_Confirmed{},
+	}
+
+	for _, cap := range req.VolumeCapabilities {
+		if err := cs.verifyVolumeCapability(cap); err != nil {
+			return nil, grpcerr.InvalidArgument(err)
+		}
+		resp.Confirmed.VolumeCapabilities = append(resp.Confirmed.VolumeCapabilities, cap)
+	}
+
+	return resp, nil
+}
+
 // Ensure the Libvirt client is connected.
 // Returns grpc error code unavailable on connection issues.
 func (cs *ControllerServer) connectedClient() (*libvirt.Libvirt, error) {
@@ -256,22 +283,30 @@ func (cs *ControllerServer) createVolumeExists(vol libvirt.StorageVol, req *csi.
 	}, nil
 }
 
+// Verify volume capability is supported.
+func (cs *ControllerServer) verifyVolumeCapability(cap *csi.VolumeCapability) error {
+	switch cap.AccessType.(type) {
+	case *csi.VolumeCapability_Block: // Does not contain anything
+	case *csi.VolumeCapability_Mount:
+		// Type is already enforced by type switch
+		//nolint:errcheck
+		cs.verifyVolumeCapabilityMount(cap.AccessType.(*csi.VolumeCapability_Mount).Mount)
+	default:
+		return errors.New("unsupported access type")
+	}
+
+	mode := cap.AccessMode.Mode
+	if !slices.Contains(cs.accessModes, mode) {
+		return fmt.Errorf("access mode %s is not supported", mode)
+	}
+	return nil
+}
+
 // Make sure all requested volume capabilities are supported.
 func (cs *ControllerServer) verifyVolumeCapabilities(caps []*csi.VolumeCapability) error {
 	for _, cap := range caps {
-		switch cap.AccessType.(type) {
-		case *csi.VolumeCapability_Block: // Does not contain anything
-		case *csi.VolumeCapability_Mount:
-			// Type is already enforced by type switch
-			//nolint:errcheck
-			cs.verifyVolumeCapabilityMount(cap.AccessType.(*csi.VolumeCapability_Mount).Mount)
-		default:
-			return errors.New("unsupported access type")
-		}
-
-		mode := cap.AccessMode.Mode
-		if !slices.Contains(cs.accessModes, mode) {
-			return fmt.Errorf("access mode %s is not supported", mode)
+		if err := cs.verifyVolumeCapability(cap); err != nil {
+			return err
 		}
 	}
 
