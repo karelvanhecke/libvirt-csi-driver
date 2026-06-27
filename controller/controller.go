@@ -296,30 +296,31 @@ func (cs *ControllerServer) lookupStoragePool(params map[string]string) (libvirt
 
 func (cs *ControllerServer) controllerPublishVolumeExists(cap *csi.VolumeCapability, vol *libvirtxml.StorageVolume, disks []libvirtxml.DomainDisk) (wwn string, ok bool, usedDevs []string, err error) {
 	var disk *libvirtxml.DomainDisk
+Loop:
 	for _, d := range disks {
 		usedDevs = append(usedDevs, d.Target.Dev)
 		if d.Source == nil {
-			continue
+			continue Loop
 		}
 
 		switch vol.Type {
 		case "file":
 			file := d.Source.File
 			if file == nil {
-				continue
+				continue Loop
 			}
 			if file.File == vol.Target.Path {
 				disk = &d
-				break
+				break Loop
 			}
 		case "block":
 			block := d.Source.Block
 			if block == nil {
-				continue
+				continue Loop
 			}
 			if block.Dev == vol.Target.Path {
 				disk = &d
-				break
+				break Loop
 			}
 		}
 	}
