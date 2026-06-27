@@ -2,12 +2,15 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/digitalocean/go-libvirt"
+	"github.com/google/uuid"
 	grpcerr "github.com/karelvanhecke/libvirt-csi-driver/pkg/errors"
 	"libvirt.org/go/libvirtxml"
 )
@@ -58,8 +61,7 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if err == nil {
 		return cs.createVolumeExists(vol, req)
 	}
-	e, ok := err.(libvirt.Error)
-	if !ok || e.Code != uint32(libvirt.ErrNoStorageVol) {
+	if !isVolNotFoundError(err) {
 		return nil, grpcerr.Internal(err)
 	}
 
@@ -105,12 +107,75 @@ func (cs *ControllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 		}
 		return &csi.DeleteVolumeResponse{}, nil
 	}
-
-	e, ok := err.(libvirt.Error)
-	if !ok || e.Code != uint32(libvirt.ErrNoStorageVol) {
+	if !isVolNotFoundError(err) {
 		return nil, grpcerr.Internal(err)
 	}
+
 	return &csi.DeleteVolumeResponse{}, nil
+}
+
+func (cs *ControllerServer) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
+	vol, err := cs.volumeSpecByID(req.GetVolumeId())
+	if err != nil {
+		return nil, err
+	}
+	disks, err := cs.domainDiskSpecsByID(req.GetNodeId())
+	if err != nil {
+		return nil, err
+	}
+
+	cap := req.GetVolumeCapability()
+
+	wwn, ok, usedDevs, err := cs.controllerPublishVolumeExists(cap, vol, disks)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return &csi.ControllerPublishVolumeResponse{PublishContext: map[string]string{"wwn": wwn}}, nil
+	}
+
+	if err := cs.verifyVolumeCapabilities([]*csi.VolumeCapability{cap}); err != nil {
+		return nil, grpcerr.InvalidArgument(err)
+	}
+
+	if cap.AccessMode.Mode == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY && !req.Readonly {
+		return nil, grpcerr.InvalidArgument(errors.New("multi node access requires readonly"))
+	}
+
+	dev, err := nextDev(usedDevs)
+	if err != nil {
+		return nil, err
+	}
+
+	wwn, err = generateWWN()
+	if err != nil {
+		return nil, err
+	}
+
+	disk, err := domainDisk(vol, wwn, dev)
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := cs.connectedClient()
+	if err != nil {
+		return nil, err
+	}
+
+	dom, err := cs.domainByID(req.GetNodeId())
+	if err != nil {
+		return nil, err
+	}
+
+	if err := c.DomainAttachDevice(dom, disk); err != nil {
+		return nil, grpcerr.Internal(err)
+	}
+
+	return &csi.ControllerPublishVolumeResponse{
+		PublishContext: map[string]string{
+			"wwn": wwn,
+		},
+	}, nil
 }
 
 // Ensure the Libvirt client is connected.
@@ -229,6 +294,163 @@ func (cs *ControllerServer) lookupStoragePool(params map[string]string) (libvirt
 	return libvirt.StoragePool{}, grpcerr.Internal(err)
 }
 
+func (cs *ControllerServer) controllerPublishVolumeExists(cap *csi.VolumeCapability, vol *libvirtxml.StorageVolume, disks []libvirtxml.DomainDisk) (wwn string, ok bool, usedDevs []string, err error) {
+	var disk *libvirtxml.DomainDisk
+	for _, d := range disks {
+		usedDevs = append(usedDevs, d.Target.Dev)
+		if d.Source == nil {
+			continue
+		}
+
+		switch vol.Type {
+		case "file":
+			file := d.Source.File
+			if file == nil {
+				continue
+			}
+			if file.File == vol.Target.Path {
+				disk = &d
+				break
+			}
+		case "block":
+			block := d.Source.Block
+			if block == nil {
+				continue
+			}
+			if block.Dev == vol.Target.Path {
+				disk = &d
+				break
+			}
+		}
+	}
+
+	if disk == nil {
+		return "", false, usedDevs, nil
+	}
+
+	if err := cs.verifyVolumeCapabilities([]*csi.VolumeCapability{cap}); err != nil {
+		return "", false, nil, grpcerr.AlreadyExists(err)
+	}
+
+	if cap.AccessMode.Mode == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY {
+		if disk.ReadOnly == nil {
+			return "", false, nil, grpcerr.AlreadyExists(err)
+		}
+	}
+
+	return disk.WWN, true, usedDevs, nil
+}
+
+func (cs *ControllerServer) volumeSpecByID(id string) (*libvirtxml.StorageVolume, error) {
+	c, err := cs.connectedClient()
+	if err != nil {
+		return nil, err
+	}
+
+	vol, err := c.StorageVolLookupByKey(id)
+	if err != nil {
+		if isVolNotFoundError(err) {
+			return nil, grpcerr.NotFound(err)
+		}
+		return nil, grpcerr.Internal(err)
+	}
+
+	volXML, err := c.StorageVolGetXMLDesc(vol, 0)
+	if err != nil {
+		return nil, grpcerr.Internal(err)
+	}
+	volSpec := &libvirtxml.StorageVolume{}
+	if err := volSpec.Unmarshal(volXML); err != nil {
+		return nil, grpcerr.Internal(err)
+	}
+
+	return volSpec, nil
+}
+
+func (cs *ControllerServer) domainDiskSpecsByID(id string) ([]libvirtxml.DomainDisk, error) {
+	c, err := cs.connectedClient()
+	if err != nil {
+		return nil, err
+	}
+
+	dom, err := cs.domainByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	domXML, err := c.DomainGetXMLDesc(dom, 0)
+	if err != nil {
+		return nil, grpcerr.Internal(err)
+	}
+	domSpec := &libvirtxml.Domain{}
+	if err := domSpec.Unmarshal(domXML); err != nil {
+		return nil, grpcerr.Internal(err)
+	}
+
+	return domSpec.Devices.Disks, nil
+}
+
+func (cs *ControllerServer) domainByID(id string) (libvirt.Domain, error) {
+	c, err := cs.connectedClient()
+	if err != nil {
+		return libvirt.Domain{}, err
+	}
+
+	uuid, err := uuid.Parse(id)
+	if err != nil {
+		return libvirt.Domain{}, grpcerr.InvalidArgument(err)
+	}
+
+	dom, err := c.DomainLookupByUUID(libvirt.UUID(uuid))
+	if err != nil {
+		e, ok := err.(libvirt.Error)
+		if !ok || e.Code != uint32(libvirt.ErrNoDomain) {
+			return libvirt.Domain{}, grpcerr.Internal(err)
+		}
+
+		return libvirt.Domain{}, grpcerr.NotFound(err)
+	}
+
+	return dom, nil
+}
+
+func domainDisk(vol *libvirtxml.StorageVolume, wwn string, dev string) (string, error) {
+	diskSpec := &libvirtxml.DomainDisk{
+		Device: "disk",
+		Driver: &libvirtxml.DomainDiskDriver{
+			Name:        "qemu",
+			Type:        vol.Target.Format.Type,
+			Discard:     "unmap",
+			DetectZeros: "unmap",
+		},
+		WWN: wwn,
+		Target: &libvirtxml.DomainDiskTarget{
+			Dev: dev,
+			Bus: "scsi",
+		},
+	}
+
+	switch vol.Type {
+	case "file":
+		diskSpec.Source.File = &libvirtxml.DomainDiskSourceFile{
+			File: vol.Target.Path,
+		}
+	case "block":
+		diskSpec.Source.Block = &libvirtxml.DomainDiskSourceBlock{
+			Dev: vol.Target.Path,
+		}
+	default:
+		return "", grpcerr.InvalidArgument(fmt.Errorf("%s volume type is not supported", vol.Type))
+	}
+
+	disk, err := diskSpec.Marshal()
+	if err != nil {
+		return "", grpcerr.Internal(err)
+	}
+
+	return disk, nil
+}
+
 func volumeId(vol libvirt.StorageVol) string {
 	return vol.Key
 }
@@ -246,4 +468,44 @@ func verifyCapacity(cap int64, capRange *csi.CapacityRange) error {
 	}
 
 	return nil
+}
+
+func isVolNotFoundError(err error) bool {
+	e, ok := err.(libvirt.Error)
+	if !ok || e.Code != uint32(libvirt.ErrNoStorageVol) {
+		return false
+	}
+	return true
+}
+
+func nextDev(used []string) (string, error) {
+	const letters = "abcdefghijklmnopqrstuvwxyz"
+
+	for i, j := 0, -1; i < 26 || j < 26; i++ {
+		if i == 26 {
+			i = 0
+			j++
+		}
+
+		f := ""
+		if j > -1 {
+			f = string(letters[j])
+		}
+
+		if id := f + string(letters[i]); !slices.Contains(used, id) {
+			return "sd" + id, nil
+		}
+	}
+
+	// In theory this will never be reached.
+	// The attached target limit is lower than the amount of possible ID's
+	return "", grpcerr.Internal(errors.New("could not generate device ID"))
+}
+
+func generateWWN() (string, error) {
+	randBytes := make([]byte, 8)
+	if _, err := rand.Read(randBytes); err != nil {
+		return "", grpcerr.Internal(err)
+	}
+	return hex.EncodeToString(randBytes), nil
 }

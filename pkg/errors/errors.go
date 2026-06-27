@@ -20,3 +20,7 @@ func Internal(err error) error {
 func InvalidArgument(err error) error {
 	return status.Error(codes.InvalidArgument, err.Error())
 }
+
+func NotFound(err error) error {
+	return status.Error(codes.NotFound, err.Error())
+}
