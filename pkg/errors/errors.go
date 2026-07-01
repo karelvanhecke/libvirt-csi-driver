@@ -24,3 +24,7 @@ func InvalidArgument(err error) error {
 func NotFound(err error) error {
 	return status.Error(codes.NotFound, err.Error())
 }
+
+func FailedPrecondition(err error) error {
+	return status.Error(codes.FailedPrecondition, err.Error())
+}

@@ -110,18 +110,17 @@ func (cs *ControllerServer) attachToDomain(vol *libvirtxml.StorageVolume, dom li
 		return nil
 	}
 
-	e, ok := err.(libvirt.Error)
-	if !ok || e.Code != uint32(libvirt.ErrResourceBusy) {
+	if !isResourceBusyError(err) {
 		return grpcerr.Internal(err)
 	}
 
-	dom, ok, err = cs.domainUsingVolume(vol)
+	dom, ok, err := cs.domainUsingVolume(vol)
 	if err != nil {
 		return err
 	}
 
 	if !ok {
-		return grpcerr.Internal(e)
+		return grpcerr.Internal(err)
 	}
 
 	id, err := uuid.ParseBytes(dom.UUID[:])

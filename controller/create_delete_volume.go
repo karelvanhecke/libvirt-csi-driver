@@ -74,6 +74,9 @@ func (cs *ControllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 		}
 		return &csi.DeleteVolumeResponse{}, nil
 	}
+	if isResourceBusyError(err) {
+		return nil, grpcerr.FailedPrecondition(err)
+	}
 	if !isVolNotFoundError(err) {
 		return nil, grpcerr.Internal(err)
 	}
