@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/digitalocean/go-libvirt"
@@ -48,7 +47,7 @@ func (cs *ControllerServer) ControllerExpandVolume(ctx context.Context, req *csi
 	}
 
 	if requestedBytes > int64(poolCapacity) {
-		return nil, grpcerr.InvalidArgument(errors.New("request exceeds available storage pool capacity"))
+		return nil, grpcerr.InvalidArgument(ErrRequestExceedsPoolCapacity)
 	}
 
 	volXML, err := c.StorageVolGetXMLDesc(vol, 0)
@@ -58,7 +57,7 @@ func (cs *ControllerServer) ControllerExpandVolume(ctx context.Context, req *csi
 
 	volSpec := &libvirtxml.StorageVolume{}
 	if err := volSpec.Unmarshal(volXML); err != nil {
-		return nil, grpcerr.AlreadyExists(err)
+		return nil, grpcerr.Internal(err)
 	}
 
 	dom, ok, err := cs.domainUsingVolume(volSpec)
@@ -81,6 +80,9 @@ func (cs *ControllerServer) ControllerExpandVolume(ctx context.Context, req *csi
 	}
 
 	if cap := req.VolumeCapability; cap != nil {
+		if err := cs.verifyVolumeCapability(cap); err != nil {
+			return nil, grpcerr.InvalidArgument(err)
+		}
 		if _, ok := cap.AccessType.(*csi.VolumeCapability_Block); ok {
 			resp.NodeExpansionRequired = false
 		}

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/digitalocean/go-libvirt"
@@ -36,10 +35,21 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		return nil, grpcerr.InvalidArgument(err)
 	}
 
+	_, _, _, poolCapacity, err := c.StoragePoolGetInfo(pool)
+	if err != nil {
+		return nil, grpcerr.Internal(err)
+	}
+
+	requestedCapacity := cs.determineCapacity(req.CapacityRange)
+
+	if requestedCapacity > poolCapacity {
+		return nil, grpcerr.InvalidArgument(ErrRequestExceedsPoolCapacity)
+	}
+
 	spec := &libvirtxml.StorageVolume{
 		Name: name,
 		Capacity: &libvirtxml.StorageVolumeSize{
-			Value: cs.determineCapacity(req.CapacityRange),
+			Value: requestedCapacity,
 		},
 	}
 
@@ -133,11 +143,11 @@ func verifyCapacity(cap int64, capRange *csi.CapacityRange) error {
 		return nil
 	}
 	if rb := capRange.RequiredBytes; rb != 0 && cap < rb {
-		return errors.New("existing volume does not meet required capacity")
+		return ErrExistingVolumeRequiredCapacity
 	}
 
 	if lb := capRange.LimitBytes; lb != 0 && cap > lb {
-		return errors.New("existing volume exceeds capacity limit")
+		return ErrExistingVolumeCapacityLimit
 	}
 
 	return nil

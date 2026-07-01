@@ -1,107 +1,94 @@
 package controller
 
 import (
-	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"libvirt.org/go/libvirtxml"
 )
 
-func TestValidateVolumeCapabilitiesVolNotFound(t *testing.T) {
-	cs := NewControllerServer(testClient(t), testPool)
-
-	_, err := cs.ValidateVolumeCapabilities(t.Context(), &csi.ValidateVolumeCapabilitiesRequest{VolumeId: t.Name()})
-	if err == nil {
-		t.Log("error should not be nil")
-		t.FailNow()
+func TestValidateVolumeCapabilities(t *testing.T) {
+	volume := &libvirtxml.StorageVolume{
+		Name:     "test-volume",
+		Capacity: &libvirtxml.StorageVolumeSize{Value: 1},
 	}
+	te := newTestEnv(t, withVolumes(volume))
 
-	s, ok := status.FromError(err)
-	if !ok {
-		t.Log("error should contain a grpc status")
-		t.FailNow()
-	}
+	volumeID := te.volumeID(volume.Name)
 
-	if s.Code() != codes.NotFound {
-		t.Log("status code should be NotFound")
-		t.Fail()
-	}
-}
+	cs := NewControllerServer(te.client, te.poolName())
 
-func TestValidateVolumeCapabilitiesConfirmed(t *testing.T) {
-	cs := NewControllerServer(testClient(t), testPool)
-
-	expectedCapability := &csi.VolumeCapability{
-		AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{}},
-		AccessMode: &csi.VolumeCapability_AccessMode{
-			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
+	capabilities := []*csi.VolumeCapability{
+		{
+			AccessType: &csi.VolumeCapability_Block{},
+			AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_MULTI_WRITER},
+		},
+		{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_SINGLE_WRITER},
 		},
 	}
 
-	resp, err := cs.ValidateVolumeCapabilities(t.Context(), &csi.ValidateVolumeCapabilitiesRequest{
-		VolumeId: filepath.Join("/", testPool, testVol),
-		VolumeCapabilities: []*csi.VolumeCapability{
-			expectedCapability,
-		}})
-	if err != nil {
-		t.Log("error should be nil")
-		t.FailNow()
-	}
+	t.Run("Confirmed", func(t *testing.T) {
+		resp, err := cs.ValidateVolumeCapabilities(t.Context(), &csi.ValidateVolumeCapabilitiesRequest{
+			VolumeId:           volumeID,
+			VolumeCapabilities: capabilities,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	if resp.Confirmed == nil {
-		t.Log("call should return confirmed")
-		t.FailNow()
-	}
+		if resp.Confirmed == nil {
+			t.Fatal("confirmed should be set")
+		}
 
-	if resp.Confirmed.VolumeCapabilities == nil {
-		t.Log("supported volume capabilities should be returned")
-		t.FailNow()
-	}
+		if len(resp.Confirmed.VolumeCapabilities) != len(capabilities) {
+			t.Fatal("all supported capabilities should be returned")
+		}
+	})
 
-	if !slices.ContainsFunc(resp.Confirmed.VolumeCapabilities, func(cap *csi.VolumeCapability) bool {
-		_, ok := cap.AccessType.(*csi.VolumeCapability_Mount)
+	t.Run("VolumeNotFound", func(t *testing.T) {
+		_, err := cs.ValidateVolumeCapabilities(t.Context(), &csi.ValidateVolumeCapabilitiesRequest{
+			VolumeId:           "non-existing",
+			VolumeCapabilities: capabilities,
+		})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		st, ok := status.FromError(err)
 		if !ok {
-			return false
+			t.Fatal("expected GRPC error")
 		}
-		if cap.AccessMode.Mode != expectedCapability.GetAccessMode().GetMode() {
-			return false
+		if got, expected := st.Code(), codes.NotFound; got != expected {
+			t.Fatalf("expected code %d, got %d", expected, got)
 		}
-		return true
-	}) {
-		t.Log("supported capability not found in confirmation")
-		t.Fail()
-	}
-}
+	})
 
-func TestValidateVolumeCapabilitiesUnsupported(t *testing.T) {
-	cs := NewControllerServer(testClient(t), testPool)
-
-	_, err := cs.ValidateVolumeCapabilities(t.Context(), &csi.ValidateVolumeCapabilitiesRequest{
-		VolumeId: filepath.Join("/", testPool, testVol),
-		VolumeCapabilities: []*csi.VolumeCapability{
-			{
-				AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{}},
-				AccessMode: &csi.VolumeCapability_AccessMode{
-					Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+	t.Run("UnsupportedCapability", func(t *testing.T) {
+		_, err := cs.ValidateVolumeCapabilities(t.Context(), &csi.ValidateVolumeCapabilitiesRequest{
+			VolumeId: volumeID,
+			VolumeCapabilities: []*csi.VolumeCapability{
+				{
+					AccessType: &csi.VolumeCapability_Block{},
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_UNKNOWN,
+					},
 				},
 			},
-		}})
-	if err == nil {
-		t.Log("error should not be nil")
-		t.FailNow()
-	}
-
-	s, ok := status.FromError(err)
-	if !ok {
-		t.Log("error should contain a grpc status")
-		t.FailNow()
-	}
-
-	if s.Code() != codes.InvalidArgument {
-		t.Log("status code should be InvalidArgument")
-		t.Fail()
-	}
+		})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		st, ok := status.FromError(err)
+		if !ok {
+			t.Fatal("expected GRPC error")
+		}
+		if got, expected := st.Code(), codes.InvalidArgument; got != expected {
+			t.Fatalf("expected code %d, got %d", expected, got)
+		}
+	})
 }

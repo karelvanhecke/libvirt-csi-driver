@@ -2,15 +2,10 @@ package controller
 
 import (
 	"context"
-	"errors"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/digitalocean/go-libvirt"
 	grpcerr "github.com/karelvanhecke/libvirt-csi-driver/pkg/errors"
-)
-
-var (
-	ErrVolumeMustBeReadOnly = errors.New("volume must be read only")
 )
 
 type ControllerServer struct {

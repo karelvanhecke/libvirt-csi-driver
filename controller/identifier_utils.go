@@ -3,7 +3,6 @@ package controller
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"slices"
 
 	"github.com/digitalocean/go-libvirt"
@@ -33,7 +32,7 @@ func nextDev(used []string) (string, error) {
 		}
 	}
 
-	return "", grpcerr.Internal(errors.New("could not generate device ID"))
+	return "", grpcerr.Internal(ErrGenerateDeviceID)
 }
 
 func generateWWN() (string, error) {

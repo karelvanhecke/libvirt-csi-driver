@@ -25,7 +25,7 @@ func (cs *ControllerServer) ControllerPublishVolume(ctx context.Context, req *cs
 		return nil, err
 	}
 	if ok {
-		if err := cs.verifyVolumeCapabilities([]*csi.VolumeCapability{cap}); err != nil {
+		if err := cs.verifyVolumeCapability(cap); err != nil {
 			return nil, grpcerr.AlreadyExists(err)
 		}
 
@@ -38,7 +38,7 @@ func (cs *ControllerServer) ControllerPublishVolume(ctx context.Context, req *cs
 		return &csi.ControllerPublishVolumeResponse{PublishContext: map[string]string{"wwn": disk.WWN}}, nil
 	}
 
-	if err := cs.verifyVolumeCapabilities([]*csi.VolumeCapability{cap}); err != nil {
+	if err := cs.verifyVolumeCapability(cap); err != nil {
 		return nil, grpcerr.InvalidArgument(err)
 	}
 

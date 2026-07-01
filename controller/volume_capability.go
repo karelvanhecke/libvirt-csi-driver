@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"errors"
-	"fmt"
 	"slices"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -13,16 +11,15 @@ func (cs *ControllerServer) verifyVolumeCapability(cap *csi.VolumeCapability) er
 	switch cap.AccessType.(type) {
 	case *csi.VolumeCapability_Block: // Does not contain anything
 	case *csi.VolumeCapability_Mount:
-		// Type is already enforced by type switch
-		//nolint:errcheck
-		cs.verifyVolumeCapabilityMount(cap.AccessType.(*csi.VolumeCapability_Mount).Mount)
+		if err := cs.verifyVolumeCapabilityMount(cap.AccessType.(*csi.VolumeCapability_Mount).Mount); err != nil {
+			return err
+		}
 	default:
-		return errors.New("unsupported access type")
+		return ErrUnsupportedAccessType
 	}
 
-	mode := cap.AccessMode.Mode
-	if !slices.Contains(cs.accessModes, mode) {
-		return fmt.Errorf("access mode %s is not supported", mode)
+	if !slices.Contains(cs.accessModes, cap.AccessMode.Mode) {
+		return ErrUnsupportedAccessMode
 	}
 	return nil
 }
@@ -42,12 +39,12 @@ func (cs *ControllerServer) verifyVolumeCapabilities(caps []*csi.VolumeCapabilit
 func (cs *ControllerServer) verifyVolumeCapabilityMount(mount *csi.VolumeCapability_MountVolume) error {
 	if fs := mount.FsType; fs != "" {
 		if !slices.Contains(cs.fsTypes, fs) {
-			return errors.New("unsupported filesystem")
+			return ErrUnsupportedFilesystem
 		}
 	}
 
 	if mount.MountFlags != nil {
-		return errors.New("mount flags are not supported")
+		return ErrMountFlagsNotSupported
 	}
 
 	return nil
