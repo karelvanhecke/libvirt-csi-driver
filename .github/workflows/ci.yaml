@@ -1,0 +1,63 @@
+---
+name: Continuous integration
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  changes: 
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Paths filter
+        id: filter
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        with:
+          filters: |
+            go:
+              - go.*
+              - *.go
+              - **/*.go
+
+  golangci-lint:
+    name: Golangci-lint
+    runs-on: ubuntu-latest
+    needs: ["changes"]
+    if: ${{ needs.changes.outputs.go == 'true' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: 1.26.4
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.12.2
+
+  go-test:
+    name: Go test
+    runs-on: ubuntu-latest
+    needs: ["changes"]
+    if: ${{ needs.changes.outputs.go == 'true' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: 1.26.4
+
+      - name: Run go tests
+        run: go test ./...
