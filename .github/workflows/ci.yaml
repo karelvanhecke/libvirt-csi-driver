@@ -61,8 +61,12 @@ jobs:
 
       - name: Setup Libvirt
         run: |
+          sudo mkdir -p /etc/systemd/system/libvirtd.socket.d/
+          sudo cat << EOF > /etc/systemd/system/libvirtd.socket.d/10-user.conf
+          [Socket]
+          SocketUser=$USER
+          EOF
           sudo sh -c "apt-get update && apt-get install libvirt-daemon-system"
-          sudo usermod -a -G libvirt $USER
 
       - name: Run go tests
         run: go test ./...
