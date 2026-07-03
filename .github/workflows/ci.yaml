@@ -104,7 +104,7 @@ jobs:
     name: Set required commit statuses
     runs-on: ubuntu-latest
     needs: ["changes"]
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request' && !(needs.changes.outputs.go && needs.changes.outputs.actions && needs.changes.outputs.renovate-config) }}
     permissions:
       statuses: write
     steps:
@@ -117,6 +117,7 @@ jobs:
         with:
           context: Renovate config validation
           state: ${{ (needs.changes.outputs.renovate-config == 'true' && !startsWith(github.head_ref, 'renovate/') ) && 'failure' || 'success' }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set CodeQL commit status
         if: ${{ !(needs.changes.outputs.go || needs.changes.outputs.actions) }}
@@ -124,6 +125,7 @@ jobs:
         with:
           context: CodeQL
           state: success
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set osv-scanner commit status
         if: ${{ !needs.changes.outputs.go }}
@@ -131,3 +133,4 @@ jobs:
         with:
           context: osv-scanner
           state: success
+          token: ${{ secrets.GITHUB_TOKEN }}
