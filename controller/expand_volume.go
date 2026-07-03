@@ -91,3 +91,28 @@ func (cs *ControllerServer) ControllerExpandVolume(ctx context.Context, req *csi
 
 	return resp, nil
 }
+
+func (cs *ControllerServer) domainUsingVolume(vol *libvirtxml.StorageVolume) (dom libvirt.Domain, ok bool, err error) {
+	c, err := cs.connectedClient()
+	if err != nil {
+		return libvirt.Domain{}, false, err
+	}
+
+	doms, _, err := c.ConnectListAllDomains(1, libvirt.ConnectListDomainsActive)
+	if err != nil {
+		return libvirt.Domain{}, false, grpcerr.Internal(err)
+	}
+
+	for _, dom := range doms {
+		_, ok, _, err := cs.isAttachedToDomain(vol, dom)
+		if err != nil {
+			return libvirt.Domain{}, false, grpcerr.Internal(err)
+		}
+
+		if ok {
+			return dom, true, nil
+		}
+	}
+
+	return libvirt.Domain{}, false, nil
+}

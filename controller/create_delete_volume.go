@@ -152,3 +152,7 @@ func verifyCapacity(cap int64, capRange *csi.CapacityRange) error {
 
 	return nil
 }
+
+func volumeId(vol libvirt.StorageVol) string {
+	return vol.Key
+}
