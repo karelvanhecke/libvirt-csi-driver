@@ -6,6 +6,7 @@ go:
 
 actions:
   - '.github/workflows/*'
+  - '.github/actions/**'
 
 renovate-config:
   - "renovate.json"
