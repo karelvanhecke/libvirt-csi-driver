@@ -1,0 +1,23 @@
+---
+go:
+  - 'go.*'
+  - '*.go'
+  - '**/*.go'
+
+actions:
+  - '.github/workflows/*'
+
+renovate-config:
+  - "renovate.json"
+  - "renovate.jsonc"
+  - "renovate.json5"
+  - ".github/renovate.json"
+  - ".github/renovate.jsonc"
+  - ".github/renovate.json5"
+  - ".gitlab/renovate.json"
+  - ".gitlab/renovate.jsonc"
+  - ".gitlab/renovate.json5"
+  - ".renovaterc"
+  - ".renovaterc.json"
+  - ".renovaterc.jsonc"
+  - ".renovaterc.json5"

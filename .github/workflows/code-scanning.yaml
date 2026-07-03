@@ -1,0 +1,154 @@
+---
+name: Code scanning
+
+on:
+  schedule:
+    - cron: '15 1 * * *'
+  workflow_call:
+    inputs:
+      go:
+        description: Enable Go code scanning jobs
+        required: true
+        type: boolean
+      actions:
+        description: Enable Actions code scanning job
+        required: true
+        type: boolean
+
+permissions:
+  security-events: write
+
+jobs:
+  codeql-go:
+    name: CodeQL for Go
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'schedule' || inputs.go }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: 1.26.4
+
+      - name: Init
+        uses: github/codeql-action/init@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          languages: go
+          build-mode: autobuild
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          category: "/language:go"
+
+  codeql-actions:
+    name: CodeQL for GitHub actions
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'schedule' || inputs.actions }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Init
+        uses: github/codeql-action/init@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          languages: actions
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          category: "/language:actions"
+
+  osv-scanner:
+    name: OSV-Scanner
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'schedule' || inputs.go }}
+    steps:
+      - name: Checkout code (push|schedule)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: ${{ github.event_name != 'pull_request' }}
+        with:
+          persist-credentials: false
+
+      - name: Run scanner (push|schedule)
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        if: ${{ github.event_name != 'pull_request' }}
+        with:
+          scan-args: |-
+            --config=.github/osv-scanner.toml
+            --output-file=results.json
+            --format=json
+            -r
+            ./
+        continue-on-error: true
+
+      - name: Run osv-scanner-reporter (push|schedule)
+        uses: google/osv-scanner-action/osv-reporter-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        if: ${{ github.event_name != 'pull_request' }}
+        with:
+          scan-args: |-
+            --output-files=results.sarif
+            --new=results.json
+            --gh-annotations=false
+            --fail-on-vuln=false
+
+      - name: Checkout code (pull request)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          fetch-depth: 0
+
+      - name: Checkout target branch (pull request)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          git checkout $GITHUB_BASE_REF
+          git submodule update --recursive
+
+      - name: Run scanner on existing code (pull request)
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true
+        with:
+          scan-args: |-
+            --config=.github/osv-scanner.toml
+            --format=json
+            --output-file=old-results.json
+            -r
+            ./
+
+      - name: Checkout current branch (pull request)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          git checkout -f $GITHUB_SHA
+          git submodule update --recursive
+
+      - name: Run scanner on new code (pull request)
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          scan-args: |-
+            --config=.github/osv-scanner.toml
+            --format=json
+            --output-file=new-results.json
+            -r
+            ./
+        continue-on-error: true
+
+      - name: Run osv-scanner-reporter (pull request)
+        uses: google/osv-scanner-action/osv-reporter-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          scan-args: |-
+            --output-files=results.sarif
+            --old=old-results.json
+            --new=new-results.json
+            --gh-annotations=true
+            --fail-on-vuln=true
+
+      - name: Upload to code-scanning
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          sarif_file: results.sarif
