@@ -120,7 +120,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set CodeQL commit status
-        if: ${{ !(needs.changes.outputs.go || needs.changes.outputs.actions) }}
+        if: ${{ !(needs.changes.outputs.go == 'true' || needs.changes.outputs.actions == 'true') }}
         uses: ./.github/actions/commit-status
         with:
           context: CodeQL
@@ -128,7 +128,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set osv-scanner commit status
-        if: ${{ !needs.changes.outputs.go }}
+        if: ${{ !(needs.changes.outputs.go == 'true') }}
         uses: ./.github/actions/commit-status
         with:
           context: osv-scanner
