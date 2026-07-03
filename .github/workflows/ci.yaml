@@ -62,7 +62,7 @@ jobs:
       - name: Setup Libvirt
         run: |
           sudo mkdir -p /etc/systemd/system/libvirtd.socket.d/
-          sudo cat << EOF > /etc/systemd/system/libvirtd.socket.d/10-user.conf
+          cat << EOF | sudo tee /etc/systemd/system/libvirtd.socket.d/10-user.conf
           [Socket]
           SocketUser=$USER
           EOF
