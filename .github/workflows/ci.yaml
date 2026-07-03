@@ -60,7 +60,9 @@ jobs:
           go-version: 1.26.4
 
       - name: Setup Libvirt
-        run: sudo sh -c "apt-get update && apt-get install libvirt-daemon-system"
+        run: |
+          sudo sh -c "apt-get update && apt-get install libvirt-daemon-system"
+          sudo usermod -a -G libvirt $USER
 
       - name: Run go tests
         run: go test ./...
