@@ -1,3 +1,6 @@
+// Copyright 2026 Karel Van Hecke
+// SPDX-License-Identifier: Apache-2.0
+
 package controller
 
 import (
