@@ -51,44 +51,49 @@ func TestValidateVolumeCapabilities(t *testing.T) {
 		}
 	})
 
-	t.Run("VolumeNotFound", func(t *testing.T) {
-		_, err := cs.ValidateVolumeCapabilities(t.Context(), &csi.ValidateVolumeCapabilitiesRequest{
-			VolumeId:           "non-existing",
-			VolumeCapabilities: capabilities,
-		})
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatal("expected GRPC error")
-		}
-		if got, expected := st.Code(), codes.NotFound; got != expected {
-			t.Fatalf("expected code %d, got %d", expected, got)
-		}
-	})
-
-	t.Run("UnsupportedCapability", func(t *testing.T) {
-		_, err := cs.ValidateVolumeCapabilities(t.Context(), &csi.ValidateVolumeCapabilitiesRequest{
-			VolumeId: volumeID,
-			VolumeCapabilities: []*csi.VolumeCapability{
-				{
-					AccessType: &csi.VolumeCapability_Block{},
-					AccessMode: &csi.VolumeCapability_AccessMode{
-						Mode: csi.VolumeCapability_AccessMode_UNKNOWN,
+	errTests := []struct {
+		Name         string
+		Req          *csi.ValidateVolumeCapabilitiesRequest
+		ExpectedCode codes.Code
+	}{
+		{
+			Name: "VolumeNotFound",
+			Req: &csi.ValidateVolumeCapabilitiesRequest{
+				VolumeId:           "non-existing",
+				VolumeCapabilities: capabilities,
+			},
+			ExpectedCode: codes.NotFound,
+		},
+		{
+			Name: "UnsupportedCapability",
+			Req: &csi.ValidateVolumeCapabilitiesRequest{
+				VolumeId: volumeID,
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Block{},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_UNKNOWN,
+						},
 					},
 				},
 			},
+			ExpectedCode: codes.InvalidArgument,
+		},
+	}
+
+	for _, errTest := range errTests {
+		t.Run(errTest.Name, func(t *testing.T) {
+			_, err := cs.ValidateVolumeCapabilities(t.Context(), errTest.Req)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			st, ok := status.FromError(err)
+			if !ok {
+				t.Fatal("expected GRPC error")
+			}
+			if got, expected := st.Code(), errTest.ExpectedCode; got != expected {
+				t.Fatalf("expected code %d, got %d", expected, got)
+			}
 		})
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatal("expected GRPC error")
-		}
-		if got, expected := st.Code(), codes.InvalidArgument; got != expected {
-			t.Fatalf("expected code %d, got %d", expected, got)
-		}
-	})
+	}
 }

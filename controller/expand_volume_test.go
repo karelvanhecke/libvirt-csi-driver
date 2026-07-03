@@ -53,48 +53,51 @@ func TestControllerExpandVolume(t *testing.T) {
 		}
 	})
 
-	t.Run("NotFound", func(t *testing.T) {
-		req := &csi.ControllerExpandVolumeRequest{
-			VolumeId:      "fake",
-			CapacityRange: &csi.CapacityRange{RequiredBytes: 8192, LimitBytes: 8192},
-		}
-
-		_, err := cs.ControllerExpandVolume(t.Context(), req)
-
-		if err == nil {
-			t.Fatal("expected error")
-		}
-
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatal("expected grpc error")
-		}
-
-		if got, expected := st.Code(), codes.NotFound; got != expected {
-			t.Fatalf("expected code %d, got %d", expected, got)
-		}
-	})
-
-	t.Run("ExceedsCapabilities", func(t *testing.T) {
-		req.VolumeCapability = &csi.VolumeCapability{
-			AccessType: &csi.VolumeCapability_Block{},
-			AccessMode: &csi.VolumeCapability_AccessMode{
-				Mode: csi.VolumeCapability_AccessMode_UNKNOWN,
+	errTests := []struct {
+		Name         string
+		Req          *csi.ControllerExpandVolumeRequest
+		ExpectedCode codes.Code
+	}{
+		{
+			Name: "NotFound",
+			Req: &csi.ControllerExpandVolumeRequest{
+				VolumeId:      "fake",
+				CapacityRange: &csi.CapacityRange{RequiredBytes: 8192, LimitBytes: 8192},
 			},
-		}
-		_, err := cs.ControllerExpandVolume(t.Context(), req)
+			ExpectedCode: codes.NotFound,
+		},
+		{
+			Name: "ExceedsCapabilities",
+			Req: &csi.ControllerExpandVolumeRequest{
+				VolumeId: volumeID,
+				CapacityRange: &csi.CapacityRange{
+					RequiredBytes: 8192,
+					LimitBytes:    8192,
+				},
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Block{},
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_UNKNOWN,
+					},
+				},
+			},
+			ExpectedCode: codes.InvalidArgument,
+		},
+	}
 
-		if err == nil {
-			t.Fatal("expected error")
-		}
-
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatal("expected grpc error")
-		}
-
-		if got, expected := st.Code(), codes.InvalidArgument; got != expected {
-			t.Fatalf("expected code %d, got %d", expected, got)
-		}
-	})
+	for _, errTest := range errTests {
+		t.Run(errTest.Name, func(t *testing.T) {
+			_, err := cs.ControllerExpandVolume(t.Context(), errTest.Req)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			st, ok := status.FromError(err)
+			if !ok {
+				t.Fatal("expected GRPC error")
+			}
+			if got, expected := st.Code(), errTest.ExpectedCode; got != expected {
+				t.Fatalf("expected code %d, got %d", expected, got)
+			}
+		})
+	}
 }
