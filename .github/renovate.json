@@ -2,6 +2,14 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "packageRules": [
     {
+      "groupName": "go",
+      "matchDepNames": [
+        "go",
+        "go-security-level"
+      ],
+      "minimumGroupSize": 2
+    },
+    {
       "matchCurrentVersion": "!/^v?0/",
       "matchUpdateTypes": [
         "minor"
@@ -21,7 +29,7 @@
       "managerFilePatterns": [
         ".github/osv-scanner.toml"
       ],
-      "depNameTemplate": "go",
+      "depNameTemplate": "go-security-level",
       "datasourceTemplate": "golang-version",
       "matchStrings": [
         "GoVersionOverride = \"(?<currentValue>.+?)\""
