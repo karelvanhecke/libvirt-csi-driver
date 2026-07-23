@@ -5,9 +5,6 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -33,7 +30,7 @@ jobs:
     name: Golangci-lint
     runs-on: ubuntu-latest
     needs: ["changes"]
-    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.go == 'true' }}
+    if: ${{ needs.changes.outputs.go == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,7 +49,7 @@ jobs:
     name: Go test
     runs-on: ubuntu-latest
     needs: ["changes"]
-    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.go == 'true' }}
+    if: ${{ needs.changes.outputs.go == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,21 +71,11 @@ jobs:
       - name: Run go tests
         run: go test ./...
 
-  code-scanning:
-    name: Code scanning
-    uses: ./.github/workflows/code-scanning.yaml
-    needs: ["changes"]
-    permissions:
-      security-events: write
-    with:
-      go: ${{ needs.changes.outputs.go == 'true' }}
-      actions: ${{ needs.changes.outputs.actions == 'true' }}
-
   dependency-review:
     name: Dependency review
     runs-on: ubuntu-latest
     needs: ["changes"]
-    if: ${{ github.event_name == 'pull_request' && (needs.changes.outputs.go == 'true' || needs.changes.outputs.actions == 'true') }}
+    if: ${{ needs.changes.outputs.go == 'true' || needs.changes.outputs.actions == 'true' }}
     permissions:
       pull-requests: write
     steps:
@@ -104,7 +91,7 @@ jobs:
     name: Set required commit statuses
     runs-on: ubuntu-latest
     needs: ["changes"]
-    if: ${{ github.event_name == 'pull_request' && !(needs.changes.outputs.go && needs.changes.outputs.actions && needs.changes.outputs.renovate-config) }}
+    if: ${{ !(needs.changes.outputs.go && needs.changes.outputs.actions && needs.changes.outputs.renovate-config) }}
     permissions:
       statuses: write
     steps:
