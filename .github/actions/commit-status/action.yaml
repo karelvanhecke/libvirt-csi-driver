@@ -14,7 +14,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Set Greeting
+    - name: Set commit status
       run: |
         curl -L \
           -X POST \
