@@ -5,6 +5,15 @@
   ],
   "packageRules": [
     {
+      "semanticCommitType": "fix",
+      "matchDepTypes": [
+        "indirect"
+      ],
+      "matchManagers": [
+        "gomod"
+      ]
+    },
+    {
       "groupName": "go",
       "matchDepNames": [
         "go",
