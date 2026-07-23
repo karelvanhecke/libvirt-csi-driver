@@ -1,6 +1,6 @@
 module github.com/karelvanhecke/libvirt-csi-driver
 
-go 1.26.4
+go 1.26.0
 
 require (
 	github.com/container-storage-interface/spec v1.12.0
