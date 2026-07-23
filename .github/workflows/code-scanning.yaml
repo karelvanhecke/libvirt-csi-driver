@@ -4,25 +4,39 @@ name: Code scanning
 on:
   schedule:
     - cron: '15 1 * * *'
-  workflow_call:
-    inputs:
-      go:
-        description: Enable Go code scanning jobs
-        required: true
-        type: boolean
-      actions:
-        description: Enable Actions code scanning job
-        required: true
-        type: boolean
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 permissions:
   security-events: write
 
 jobs:
+  changes: 
+    name: Detect changes
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'schedule' }}
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      actions: ${{ steps.filter.outputs.actions }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Paths filter
+        id: filter
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        with:
+          filters: .github/paths-filter.yaml
+
   codeql-go:
     name: CodeQL for Go
+    needs: ["changes"]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'schedule' || inputs.go }}
+    if: ${{ (!cancelled() && github.event_name == 'schedule') || needs.changes.outputs.go == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,8 +59,9 @@ jobs:
 
   codeql-actions:
     name: CodeQL for GitHub actions
+    needs: ["changes"]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'schedule' || inputs.actions }}
+    if: ${{ (!cancelled() && github.event_name == 'schedule') || needs.changes.outputs.actions == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,8 +78,9 @@ jobs:
 
   osv-scanner:
     name: OSV-Scanner
+    needs: ["changes"]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'schedule' || inputs.go }}
+    if: ${{ (!cancelled() && github.event_name == 'schedule') || needs.changes.outputs.go == 'true' }}
     steps:
       - name: Checkout code (push|schedule)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
