@@ -3,7 +3,7 @@ module github.com/karelvanhecke/libvirt-csi-driver
 go 1.26.0
 
 require (
-	github.com/container-storage-interface/spec v1.12.0
+	github.com/container-storage-interface/spec v1.13.0
 	github.com/digitalocean/go-libvirt v0.0.0-20260609165003-6254771e63a8
 	github.com/google/uuid v1.6.0
 	google.golang.org/grpc v1.82.1
