@@ -7,7 +7,7 @@ require (
 	github.com/digitalocean/go-libvirt v0.0.0-20260814190004-1a83157e1858
 	github.com/google/uuid v1.6.0
 	google.golang.org/grpc v1.83.2
-	libvirt.org/go/libvirtxml v1.12005.0
+	libvirt.org/go/libvirtxml v1.12007.0
 )
 
 require (
