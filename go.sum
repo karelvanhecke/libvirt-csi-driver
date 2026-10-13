@@ -2,8 +2,8 @@ github.com/container-storage-interface/spec v1.13.0 h1:6ja3nYoACisewTPAAZkJ1pbf4
 github.com/container-storage-interface/spec v1.13.0/go.mod h1:fPZ7EFHYJwIwc9CMcoaT/yIhFTdToocYVtyafMG7EDM=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/digitalocean/go-libvirt v0.0.0-20260814190004-1a83157e1858 h1:8xCFt73OddCD5WXxoYidJBWp3bJMC+CpE7Zwf5tcwk8=
-github.com/digitalocean/go-libvirt v0.0.0-20260814190004-1a83157e1858/go.mod h1:qb0Ofa71d3oXARQf633h2tNaeBxLsVxuDp+jcsVO2+4=
+github.com/digitalocean/go-libvirt v0.0.0-20261013170128-efbbdf578ac8 h1:ZQhCuAXz9mLpTkBCwtS7ajWp3lU7pqiaOM0fxzIyQFc=
+github.com/digitalocean/go-libvirt v0.0.0-20261013170128-efbbdf578ac8/go.mod h1:qb0Ofa71d3oXARQf633h2tNaeBxLsVxuDp+jcsVO2+4=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
 github.com/golang/protobuf v1.5.4/go.mod h1:lnTiLA8Wa4RWRcIUkrtSVa5nRhsEGBg48fD6rSs7xps=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/container-storage-interface/spec v1.13.0
-	github.com/digitalocean/go-libvirt v0.0.0-20260814190004-1a83157e1858
+	github.com/digitalocean/go-libvirt v0.0.0-20261013170128-efbbdf578ac8
 	github.com/google/uuid v1.6.0
 	google.golang.org/grpc v1.84.0
 	libvirt.org/go/libvirtxml v1.12008.0
